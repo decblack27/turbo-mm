@@ -39,6 +39,9 @@ const HTML = `<!DOCTYPE html>
   }
   #status.ok { color: #7ddc8f; }
   #status.bad { color: var(--danger); }
+  #adminOpen {
+    cursor: pointer; color: var(--gold); border-color: #4a4128; background: #2a2618; font-weight: 700;
+  }
 
   #adminbar {
     display: none; gap: 6px; padding: 8px 12px; flex-wrap: wrap;
@@ -144,6 +147,7 @@ const HTML = `<!DOCTYPE html>
     <span id="status" class="pill">⏳ ချိတ်ဆက်နေသည်...</span>
     <span id="online" class="pill">Online: 0</span>
     <span id="me" class="pill">—</span>
+    <button id="adminOpen" type="button" class="pill">👑 Admin</button>
   </div>
 </header>
 
@@ -280,9 +284,12 @@ const HTML = `<!DOCTYPE html>
     lockBtn.textContent = locked ? "🔓 ပြန်ဖွင့်" : "🔒 ပိတ်";
   }
 
-  function showLogin() {
+  function showLogin(adminMode) {
+    loginKey.style.display = adminMode ? "block" : "none";
+    loginName.value = myName || loginName.value || "";
+    loginErr.textContent = "";
     login.style.display = "flex";
-    loginName.focus();
+    (loginName.value ? loginKey : loginName).focus();
   }
 
   function hideLogin() {
@@ -350,20 +357,22 @@ const HTML = `<!DOCTYPE html>
   function connect() {
     if (banned) return;
     var proto = location.protocol === "https:" ? "wss://" : "ws://";
-    ws = new WebSocket(proto + location.host + "/ws");
+    var socket = new WebSocket(proto + location.host + "/ws");
+    ws = socket;
     setStatus("⏳ ချိတ်ဆက်နေသည်...", "");
 
-    ws.onopen = function () {
+    socket.onopen = function () {
       if (myName) {
         send({ type: "join", name: myName, uid: uid, adminKey: adminKey });
       } else {
-        showLogin();
+        showLogin(false);
       }
     };
 
-    ws.onmessage = onMessage;
+    socket.onmessage = onMessage;
 
-    ws.onclose = function () {
+    socket.onclose = function () {
+      if (socket !== ws) return;
       joined = false;
       updateLock();
       if (banned) {
@@ -375,6 +384,14 @@ const HTML = `<!DOCTYPE html>
     };
   }
 
+  $("adminOpen").onclick = function () {
+    showLogin(true);
+  };
+
+  $("adminToggle").onclick = function () {
+    loginKey.style.display = loginKey.style.display === "block" ? "none" : "block";
+  };
+
   loginForm.addEventListener("submit", function (e) {
     e.preventDefault();
     var name = loginName.value.trim();
@@ -382,17 +399,32 @@ const HTML = `<!DOCTYPE html>
       loginErr.textContent = "နာမည် ထည့်ပါ";
       return;
     }
+
+    var typedKey = loginKey.value.trim();
+    var saved = localStorage.getItem("tmm_name");
+
+    // Admin key မပါဘဲ နာမည်ကို ပြောင်းခွင့်မပေးပါ
+    if (!typedKey && saved && name.toLowerCase() !== saved.toLowerCase()) {
+      loginErr.textContent = "နာမည်ကို ပြောင်းလို့ မရပါ";
+      return;
+    }
+
     loginErr.textContent = "";
-    adminKey = loginKey.value.trim();
+    adminKey = typedKey;
     if (adminKey) sessionStorage.setItem("tmm_key", adminKey);
     else sessionStorage.removeItem("tmm_key");
     myName = name;
-    send({ type: "join", name: name, uid: uid, adminKey: adminKey });
-  });
 
-  $("adminToggle").onclick = function () {
-    loginKey.style.display = loginKey.style.display === "block" ? "none" : "block";
-  };
+    // လက်ရှိ connection ကို ပိတ်ပြီး နာမည်/key အသစ်နဲ့ ပြန်ချိတ်
+    joined = false;
+    updateLock();
+    if (ws) {
+      var old = ws;
+      ws = null;
+      try { old.close(); } catch (err) {}
+    }
+    connect();
+  });
 
   form.addEventListener("submit", function (e) {
     e.preventDefault();
