@@ -39,9 +39,6 @@ const HTML = `<!DOCTYPE html>
   }
   #status.ok { color: #7ddc8f; }
   #status.bad { color: var(--danger); }
-  #adminOpen {
-    cursor: pointer; color: var(--gold); border-color: #4a4128; background: #2a2618; font-weight: 700;
-  }
 
   #adminbar {
     display: none; gap: 6px; padding: 8px 12px; flex-wrap: wrap;
@@ -147,7 +144,6 @@ const HTML = `<!DOCTYPE html>
     <span id="status" class="pill">⏳ ချိတ်ဆက်နေသည်...</span>
     <span id="online" class="pill">Online: 0</span>
     <span id="me" class="pill">—</span>
-    <button id="adminOpen" type="button" class="pill">👑 Admin</button>
   </div>
 </header>
 
@@ -175,9 +171,8 @@ const HTML = `<!DOCTYPE html>
 <div id="login">
   <form class="card" id="loginForm">
     <h2>TURBO MM</h2>
-    <p>နာမည်ကို တစ်ခါ သတ်မှတ်ပြီးရင် ပြောင်းလို့မရတော့ပါဘူး</p>
+    <p id="loginHint">နာမည်ကို တစ်ခါ သတ်မှတ်ပြီးရင် ပြောင်းလို့မရတော့ပါဘူး</p>
     <input id="loginName" placeholder="နာမည်" maxlength="20" autocomplete="off">
-    <button type="button" id="adminToggle" class="ghost">👑 Admin ဝင်ရန်</button>
     <input id="loginKey" type="password" placeholder="Admin key" style="display:none" autocomplete="off">
     <button type="submit" class="primary">ဝင်မည်</button>
     <div id="loginErr" class="err"></div>
@@ -186,10 +181,11 @@ const HTML = `<!DOCTYPE html>
 
 <script>
   var $ = function (id) { return document.getElementById(id); };
+  var IS_ADMIN_PAGE = document.body.getAttribute("data-admin") === "1";
   var list = $("messages"), form = $("form"), input = $("text"), sendBtn = $("send");
   var statusEl = $("status"), onlineEl = $("online"), meEl = $("me");
   var login = $("login"), loginForm = $("loginForm"), loginName = $("loginName");
-  var loginKey = $("loginKey"), loginErr = $("loginErr");
+  var loginKey = $("loginKey"), loginErr = $("loginErr"), loginHint = $("loginHint");
   var adminBar = $("adminbar"), lockBar = $("lockbar"), lockBtn = $("lockBtn");
 
   var uid = localStorage.getItem("tmm_uid");
@@ -202,6 +198,12 @@ const HTML = `<!DOCTYPE html>
   var adminKey = sessionStorage.getItem("tmm_key") || "";
   var isAdmin = false, locked = false, joined = false, banned = false;
   var ws = null;
+
+  if (IS_ADMIN_PAGE) {
+    document.title = "TURBO MM · Admin";
+    loginHint.textContent = "Admin ဝင်ရန် နာမည်နဲ့ Admin key ထည့်ပါ";
+    loginKey.style.display = "block";
+  }
 
   function send(obj) {
     if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj));
@@ -284,12 +286,11 @@ const HTML = `<!DOCTYPE html>
     lockBtn.textContent = locked ? "🔓 ပြန်ဖွင့်" : "🔒 ပိတ်";
   }
 
-  function showLogin(adminMode) {
-    loginKey.style.display = adminMode ? "block" : "none";
+  function showLogin() {
     loginName.value = myName || loginName.value || "";
     loginErr.textContent = "";
     login.style.display = "flex";
-    (loginName.value ? loginKey : loginName).focus();
+    (loginName.value ? (IS_ADMIN_PAGE ? loginKey : loginForm) : loginName).focus();
   }
 
   function hideLogin() {
@@ -365,7 +366,7 @@ const HTML = `<!DOCTYPE html>
       if (myName) {
         send({ type: "join", name: myName, uid: uid, adminKey: adminKey });
       } else {
-        showLogin(false);
+        showLogin();
       }
     };
 
@@ -384,14 +385,6 @@ const HTML = `<!DOCTYPE html>
     };
   }
 
-  $("adminOpen").onclick = function () {
-    showLogin(true);
-  };
-
-  $("adminToggle").onclick = function () {
-    loginKey.style.display = loginKey.style.display === "block" ? "none" : "block";
-  };
-
   loginForm.addEventListener("submit", function (e) {
     e.preventDefault();
     var name = loginName.value.trim();
@@ -400,7 +393,7 @@ const HTML = `<!DOCTYPE html>
       return;
     }
 
-    var typedKey = loginKey.value.trim();
+    var typedKey = IS_ADMIN_PAGE ? loginKey.value.trim() : "";
     var saved = localStorage.getItem("tmm_name");
 
     // Admin key မပါဘဲ နာမည်ကို ပြောင်းခွင့်မပေးပါ
@@ -415,7 +408,6 @@ const HTML = `<!DOCTYPE html>
     else sessionStorage.removeItem("tmm_key");
     myName = name;
 
-    // လက်ရှိ connection ကို ပိတ်ပြီး နာမည်/key အသစ်နဲ့ ပြန်ချိတ်
     joined = false;
     updateLock();
     if (ws) {
@@ -454,6 +446,8 @@ const HTML = `<!DOCTYPE html>
 </script>
 </body>
 </html>`;
+
+const ADMIN_PAGE = HTML.replace("<body>", '<body data-admin="1">');
 
 export class ChatRoom {
   constructor(state, env) {
@@ -526,13 +520,36 @@ export class ChatRoom {
       return this.send(ws, { type: "error", text: "နာမည်ကို ပြောင်းလို့ မရပါ" });
     }
 
-    const name = clean(data.name, MAX_NAME);
-    if (!name) {
+    const admin = !!this.env.ADMIN_KEY && data.adminKey === this.env.ADMIN_KEY;
+    const uid = clean(data.uid, 40) || crypto.randomUUID();
+    let name = clean(data.name, MAX_NAME);
+
+    const banned = (await this.state.storage.get("banned")) || [];
+    const names = (await this.state.storage.get("names")) || {};
+
+    if (!admin) {
+      // User တစ်ယောက် နာမည်သတ်မှတ်ပြီးသားဆိုရင် အဲဒီနာမည်ကိုပဲ သုံးရမယ်
+      if (names[uid]) name = names[uid];
+
+      if (!name) {
+        return this.send(ws, { type: "error", text: "နာမည် ထည့်ပါ" });
+      }
+
+      // နာမည်တူ တခြား uid က သုံးနေရင် ခွင့်မပေးဘူး
+      const taken = Object.entries(names).some(
+        ([id, n]) => id !== uid && n.toLowerCase() === name.toLowerCase()
+      );
+      if (taken) {
+        return this.send(ws, { type: "error", text: "ဒီနာမည်ကို တခြားသူ သုံးနေပါတယ်" });
+      }
+
+      if (!names[uid]) {
+        names[uid] = name;
+        await this.state.storage.put("names", names);
+      }
+    } else if (!name) {
       return this.send(ws, { type: "error", text: "နာမည် ထည့်ပါ" });
     }
-
-    const admin = !!this.env.ADMIN_KEY && data.adminKey === this.env.ADMIN_KEY;
-    const banned = (await this.state.storage.get("banned")) || [];
 
     if (!admin && banned.includes(name.toLowerCase())) {
       this.send(ws, { type: "kicked", text: "ဒီနာမည်ကို Admin က ပိတ်ထားပါတယ်။ စာမျက်နှာကို refresh လုပ်ပြီး အခြားနာမည်နဲ့ ဝင်ပါ" });
@@ -540,7 +557,6 @@ export class ChatRoom {
       return;
     }
 
-    const uid = clean(data.uid, 40) || crypto.randomUUID();
     ws.serializeAttachment({ joined: true, name, admin, uid });
     this.send(ws, { type: "joined", name, admin });
     this.broadcastOnline();
@@ -652,7 +668,9 @@ export default {
       return env.CHAT_ROOM.get(id).fetch(request);
     }
 
-    return new Response(HTML, {
+    // /admin ကိုသာ Admin key အကွက် ပါတဲ့ စာမျက်နှာ ပြမယ်
+    const page = url.pathname === "/admin" ? ADMIN_PAGE : HTML;
+    return new Response(page, {
       headers: { "Content-Type": "text/html; charset=UTF-8" },
     });
   },
