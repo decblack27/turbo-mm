@@ -34,7 +34,7 @@ export const SITE = {
   downloads: {
     title: "⬇️ VPN App Download",
     items: [
-      { icon: "🤖", name: "Android — v2rayNG (Google Play)", url: "https://play.google.com/store/apps/details?id=com.v2ray.ang" },
+      { icon: "🤖", name: "Android — v2rayNG (Google Play)", url: "https://play.google.com/store/apps/details?id=dev.hexasoftware.v2box" },
       { icon: "📦", name: "Android — v2rayNG (APK / GitHub)", url: "https://github.com/2dust/v2rayNG/releases" },
       { icon: "🍎", name: "iPhone / iPad — Streisand (App Store)", url: "https://apps.apple.com/app/id6450534064" },
       { icon: "🪟", name: "Windows — v2rayN (GitHub)", url: "https://github.com/2dust/v2rayN/releases" }
